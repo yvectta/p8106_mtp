@@ -1,0 +1,112 @@
+---
+title: "Exploratory Data Analysis (EDA)"
+author: "Fengwei Lei"
+date: "2025-03-26"
+output: html_document
+---
+
+## 1. Load Required Packages
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(rlang)
+library(reshape2)
+library(RColorBrewer)
+```
+
+## 2. Data Preparation
+```{r}
+# Load data
+load("/Users/lei/CU-Biostatistics/Data Science 2/midterm_project/mtp/dat1.RData")
+
+# Define response variable
+response_var <- "log_antibody"
+
+# Define continuous variables
+continuous_vars <- c(
+  "age",      # Age of the participant
+  "height",   # Height in cm
+  "weight",   # Weight in kg
+  "bmi",      # Body Mass Index
+  "SBP",      # Systolic Blood Pressure
+  "LDL",      # Low-Density Lipoprotein
+  "time"      # Time measurement
+)
+
+# Define categorical variables
+categorical_vars <- setdiff(names(dat1), c("id", response_var, continuous_vars))
+categorical_vars <- categorical_vars[sapply(dat1[categorical_vars], function(x) is.numeric(x) || is.factor(x))]
+
+# Convert categorical variables to factors
+dat1[categorical_vars] <- lapply(dat1[categorical_vars], factor)
+
+# Print variable types for verification
+cat("Response variable:", response_var, "\n")
+cat("Continuous variables:", paste(continuous_vars, collapse = ", "), "\n")
+cat("Categorical variables:", paste(categorical_vars, collapse = ", "), "\n")
+```
+
+## 3. Exploratory Data Analysis
+
+### 3.1 Relationship between Continuous Variables and Response Variable
+```{r}
+# Prepare data for plotting
+long_df <- dat1 %>%
+  select(all_of(c(response_var, continuous_vars))) %>%
+  pivot_longer(cols = all_of(continuous_vars), 
+              names_to = "Variable", 
+              values_to = "Value")
+
+# Plot relationships between all continuous variables and response variable
+ggplot(long_df, aes(x = Value, y = .data[[response_var]])) +
+  geom_point(alpha = 0.3, color = "grey30") +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") +    
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +                    
+  facet_wrap(~ Variable, scales = "free_x", ncol = 3) +
+  theme_minimal(base_size = 14) +
+  labs(title = paste("Linear vs Nonlinear Relationships with", response_var),
+       x = "Predictor", 
+       y = paste("Log of", response_var))
+```
+
+### 3.2 Individual Variable Relationship Plots
+```{r}
+# Create individual relationship plots for each continuous variable
+for (var in continuous_vars) {
+  p <- ggplot(dat1, aes_string(x = var, y = response_var)) +
+    geom_point(alpha = 0.2, color = "grey30") +
+    geom_smooth(method = "lm", se = FALSE, color = "red", size = 1) +
+    geom_smooth(method = "loess", se = FALSE, color = "blue", linetype = "dashed") +
+    theme_bw(base_size = 16) +
+    labs(title = paste(response_var, "vs", var),
+         x = var,
+         y = paste("Log of", response_var))
+  
+  print(p)
+}
+```
+
+### 3.3 Correlation Analysis
+```{r}
+# Prepare numeric variables data
+num_vars <- c(response_var, continuous_vars)
+df_num <- dat1[, num_vars]
+
+# Calculate correlation matrix
+cor_matrix <- round(cor(df_num, use = "complete.obs"), 2)
+
+# Convert to long format and create heatmap
+cor_melted <- melt(cor_matrix)
+ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1), space = "Lab",
+                       name="Correlation") +
+  geom_text(aes(label = value), color = "black", size = 4) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = paste("Correlation Matrix of", response_var, "and Continuous Variables"),
+       x = "", y = "")
+```
+
