@@ -1,0 +1,249 @@
+---
+title: "Model"
+author: "Zhengyong Chen"
+date: "2025-03-27"
+output: html_document
+---
+## 1. Load Required Packages
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(rlang)
+library(reshape2)
+library(RColorBrewer)
+library(mgcv)
+library(caret)
+```
+
+## 2. Data Preparation
+```{r}
+# Load data
+load("dat1.RData")
+
+# Define response variable
+response_var <- "log_antibody"
+
+# Define continuous variables
+continuous_vars <- c(
+  "age",      # Age of the participant
+  "height",   # Height in cm
+  "weight",   # Weight in kg
+  "bmi",      # Body Mass Index
+  "SBP",      # Systolic Blood Pressure
+  "LDL",      # Low-Density Lipoprotein
+  "time"      # Time measurement
+)
+
+# Define categorical variables
+categorical_vars <- setdiff(names(dat1), c("id", response_var, continuous_vars))
+categorical_vars <- categorical_vars[sapply(dat1[categorical_vars], function(x) is.numeric(x) || is.factor(x))]
+
+# Convert categorical variables to factors
+dat1[categorical_vars] <- lapply(dat1[categorical_vars], factor)
+
+# Print variable types for verification
+cat("Response variable:", response_var, "\n")
+cat("Continuous variables:", paste(continuous_vars, collapse = ", "), "\n")
+cat("Categorical variables:", paste(categorical_vars, collapse = ", "), "\n")
+```
+
+## 3. Exploratory Data Analysis
+
+### 3.1 Relationship between Continuous Variables and Response Variable
+```{r}
+# Prepare data for plotting
+long_df <- dat1 %>%
+  select(all_of(c(response_var, continuous_vars))) %>%
+  pivot_longer(cols = all_of(continuous_vars), 
+              names_to = "Variable", 
+              values_to = "Value")
+
+# Plot relationships between all continuous variables and response variable
+ggplot(long_df, aes(x = Value, y = .data[[response_var]])) +
+  geom_point(alpha = 0.3, color = "grey30") +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") +    
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +                    
+  facet_wrap(~ Variable, scales = "free_x", ncol = 3) +
+  theme_minimal(base_size = 14) +
+  labs(title = paste("Linear vs Nonlinear Relationships with", response_var),
+       x = "Predictor", 
+       y = paste("Log of", response_var))
+```
+
+### 3.2 Individual Variable Relationship Plots
+```{r}
+# Create individual relationship plots for each continuous variable
+for (var in continuous_vars) {
+  p <- ggplot(dat1, aes_string(x = var, y = response_var)) +
+    geom_point(alpha = 0.2, color = "grey30") +
+    geom_smooth(method = "lm", se = FALSE, color = "red", size = 1) +
+    geom_smooth(method = "loess", se = FALSE, color = "blue", linetype = "dashed") +
+    theme_bw(base_size = 16) +
+    labs(title = paste(response_var, "vs", var),
+         x = var,
+         y = paste("Log of", response_var))
+  
+  print(p)
+}
+```
+
+### 3.3 Correlation Analysis
+```{r}
+# Prepare numeric variables data
+num_vars <- c(response_var, continuous_vars)
+df_num <- dat1[, num_vars]
+
+# Calculate correlation matrix
+cor_matrix <- round(cor(df_num, use = "complete.obs"), 2)
+
+# Convert to long format and create heatmap
+cor_melted <- melt(cor_matrix)
+ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1), space = "Lab",
+                       name="Correlation") +
+  geom_text(aes(label = value), color = "black", size = 4) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = paste("Correlation Matrix of", response_var, "and Continuous Variables"),
+       x = "", y = "")
+```
+
+
+
+# -----------
+```{r}
+ctrl <- trainControl(method = "cv", number = 10)
+```
+
+
+
+### GAM (mgcv)
+```{r}
+# Fit the GAM model with selected predictors
+gam_model <- gam(log_antibody ~ age + height + s(bmi) + SBP + LDL + s(time) +
+                 gender + race + smoking + diabetes + hypertension,
+                 data = dat1)
+```
+
+Avoid multicollinearity:
+Since BMI is a function of weight and height, so we only use height and drop weight.
+
+### GLM
+```{r}
+set.seed(1)
+model.glm <- train(
+  log_antibody ~ age + height + bmi+ SBP + LDL + time + gender + smoking + race + diabetes + hypertension,
+  data = dat1,
+  method = "glm", 
+  trControl = ctrl
+)
+```
+
+
+### Glmnet
+```{r}
+model.glmnet <- train(
+  log_antibody ~ age + height + bmi + SBP + LDL + time +
+    gender + smoking + race + diabetes + hypertension,
+  data = dat1,
+  method = "glmnet",
+  trControl = ctrl,
+  tuneLength = 10  
+)
+```
+
+
+### GAM (caret)
+```{r}
+set.seed(1)
+model.gam <- train(
+  log_antibody ~ age + height + bmi+ SBP + LDL + time + gender + smoking + race + diabetes + hypertension,
+  data = dat1,
+  method = "gam", 
+  trControl = ctrl
+)
+```
+
+### MARS
+```{r}
+set.seed(1)
+model.mars <- train(
+  log_antibody ~ age + height + bmi+ SBP + LDL + time + gender + smoking + race + diabetes + hypertension,
+  data = dat1,
+  method = "earth",
+  tuneGrid = expand.grid(degree = 1:4, nprune = 2:20),
+  trControl = ctrl
+)
+```
+
+```{r}
+plot(model.mars)
+```
+
+### Model Comparison
+```{r}
+model_list <- list(
+  GLM = model.glm,
+  GLMNET = model.glmnet,
+  GAM = model.gam,
+  MARS = model.mars
+)
+
+res <- resamples(model_list)
+summary(res)
+bwplot(res)
+```
+
+
+### Using test data
+
+```{r}
+load("dat2.RData")
+```
+
+```{r}
+# Match factor levels to those in dat1
+for (var in categorical_vars) {
+  dat2[[var]] <- factor(dat2[[var]], levels = levels(dat1[[var]]))
+}
+```
+
+
+```{r}
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+}
+
+results <- data.frame(Model = character(), RMSE = numeric(), R2 = numeric())
+
+# Loop through models
+for (model_name in names(model_list)) {
+  model <- model_list[[model_name]]
+  preds <- predict(model, newdata = dat2)
+  
+  rmse_val <- rmse(dat2$log_antibody, preds)
+  
+  results <- rbind(results, data.frame(Model = model_name, RMSE = rmse_val))
+}
+
+print(results)
+```
+
+```{r}
+for (model_name in names(model_list)) {
+  dat2[[paste0("pred_", model_name)]] <- predict(model_list[[model_name]], newdata = dat2)
+}
+
+# Example plot for MARS
+ggplot(dat2, aes(x = log_antibody, y = pred_MARS)) +
+  geom_point(alpha = 0.3, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = "MARS: Observed vs Predicted on Test Data",
+       x = "Observed log_antibody", y = "Predicted")
+```
+
+
