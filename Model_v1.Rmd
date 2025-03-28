@@ -14,12 +14,14 @@ library(reshape2)
 library(RColorBrewer)
 library(mgcv)
 library(caret)
+library(patchwork)
 ```
 
 ## 2. Data Preparation
 ```{r}
 # Load data
 load("dat1.RData")
+summary(dat1)
 
 # Define response variable
 response_var <- "log_antibody"
@@ -40,7 +42,14 @@ categorical_vars <- setdiff(names(dat1), c("id", response_var, continuous_vars))
 categorical_vars <- categorical_vars[sapply(dat1[categorical_vars], function(x) is.numeric(x) || is.factor(x))]
 
 # Convert categorical variables to factors
-dat1[categorical_vars] <- lapply(dat1[categorical_vars], factor)
+dat1$gender <- factor(dat1$gender, levels = c(0, 1), labels = c("Female", "Male"))
+dat1$race <- factor(dat1$race, levels = 1:4, labels = c("White", "Asian", "Black", "Hispanic"))
+dat1$smoking <- factor(dat1$smoking, levels = 0:2, labels = c("Never", "Former", "Current"))
+dat1$diabetes <- factor(dat1$diabetes, levels = c(0, 1), labels = c("No", "Yes"))
+dat1$hypertension <- factor(dat1$hypertension, levels = c(0, 1), labels = c("No", "Yes"))
+
+# Check missing value
+colSums(is.na(dat1))
 
 # Print variable types for verification
 cat("Response variable:", response_var, "\n")
@@ -52,40 +61,44 @@ cat("Categorical variables:", paste(categorical_vars, collapse = ", "), "\n")
 
 ### 3.1 Relationship between Continuous Variables and Response Variable
 ```{r}
-# Prepare data for plotting
-long_df <- dat1 %>%
-  select(all_of(c(response_var, continuous_vars))) %>%
-  pivot_longer(cols = all_of(continuous_vars), 
-              names_to = "Variable", 
-              values_to = "Value")
-
 # Plot relationships between all continuous variables and response variable
-ggplot(long_df, aes(x = Value, y = .data[[response_var]])) +
-  geom_point(alpha = 0.3, color = "grey30") +
-  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") +    
-  geom_smooth(method = "loess", se = FALSE, color = "blue") +                    
-  facet_wrap(~ Variable, scales = "free_x", ncol = 3) +
-  theme_minimal(base_size = 14) +
-  labs(title = paste("Linear vs Nonlinear Relationships with", response_var),
-       x = "Predictor", 
-       y = paste("Log of", response_var))
+p_list_cont <- list()
+
+for (var in continuous_vars) {
+  p <- ggplot(dat1, aes_string(x = var, y = "log_antibody")) +
+    geom_point(alpha = 0.4) +
+    geom_smooth(method = "loess", se = FALSE, color = "blue") +
+    labs(title = paste("log_antibody vs", var)) +
+    theme_minimal()
+  p_list_cont[[var]] <- p
+}
+
+plot_cont <- wrap_plots(p_list_cont, ncol = 2)
+plot_cont
 ```
 
 ### 3.2 Individual Variable Relationship Plots
 ```{r}
 # Create individual relationship plots for each continuous variable
-for (var in continuous_vars) {
-  p <- ggplot(dat1, aes_string(x = var, y = response_var)) +
-    geom_point(alpha = 0.2, color = "grey30") +
-    geom_smooth(method = "lm", se = FALSE, color = "red", size = 1) +
-    geom_smooth(method = "loess", se = FALSE, color = "blue", linetype = "dashed") +
-    theme_bw(base_size = 16) +
-    labs(title = paste(response_var, "vs", var),
-         x = var,
-         y = paste("Log of", response_var))
-  
-  print(p)
-}
+cat_plot_list <- lapply(categorical_vars, function(var) {
+  ggplot(dat1, aes_string(x = var, y = "log_antibody", fill = var)) +
+    geom_boxplot() +
+    labs(title = paste("log_antibody by", var)) +
+    theme_minimal()
+})
+
+cat_combined <- wrap_plots(cat_plot_list, ncol = 3)
+cat_combined
+```
+
+```{r}
+# Antibody level over time since vaccination
+ggplot(dat1, aes(x = time, y = log_antibody)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", color = "red", se = TRUE) +
+  labs(title = "Antibody level over time since vaccination",
+       x = "Time since vaccination (days)",
+       y = "Log antibody level")
 ```
 
 ### 3.3 Correlation Analysis
